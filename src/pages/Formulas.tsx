@@ -6,8 +6,9 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Plus, Users, Calendar, DollarSign, Palette, Search, Image as ImageIcon, ArrowLeft, Grid, List, Clock } from "lucide-react";
+import { Command, CommandInput, CommandList, CommandItem, CommandEmpty } from "@/components/ui/command";
+import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 import { toast } from "@/hooks/use-toast";
 
 interface ColorUsage {
@@ -91,12 +92,16 @@ export default function Formulas() {
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [selectedColors, setSelectedColors] = useState<ColorUsage[]>([]);
   const [viewMode, setViewMode] = useState<'compact' | 'detailed'>('detailed');
+  const [colorPopoverOpen, setColorPopoverOpen] = useState(false);
+  const [colorSearch, setColorSearch] = useState("");
 
   const [formData, setFormData] = useState({
     clientName: "",
     isNewClient: true,
-    date: "",
+    date: new Date().toISOString().slice(0, 16), // default to now, formatted for datetime-local
     notes: "",
+    beforeImage: undefined as string | undefined,
+    afterImage: undefined as string | undefined,
   });
 
   // Group formulas by client
@@ -158,6 +163,8 @@ export default function Formulas() {
     }]);
   };
 
+  // Remove handleAddPendingColors, not needed for single-select
+
   const handleColorAmountChange = (colorId: string, amount: number) => {
     setSelectedColors(selectedColors.map(color =>
       color.colorId === colorId ? { ...color, amountUsed: amount } : color
@@ -202,6 +209,8 @@ export default function Formulas() {
       clientName: formData.clientName,
       date: formData.date,
       notes: formData.notes,
+      beforeImage: formData.beforeImage,
+      afterImage: formData.afterImage,
       colorsUsed: selectedColors,
       totalCost: calculateTotalCost(),
     };
@@ -215,8 +224,10 @@ export default function Formulas() {
     setFormData({
       clientName: "",
       isNewClient: true,
-      date: "",
+      date: new Date().toISOString().slice(0, 16), // default to now, formatted for datetime-local
       notes: "",
+      beforeImage: undefined,
+      afterImage: undefined,
     });
     setSelectedColors([]);
     setShowAddDialog(false);
@@ -225,6 +236,21 @@ export default function Formulas() {
   const totalFormulas = formulas.length;
   const uniqueClients = getClients().length;
   const avgCost = formulas.reduce((sum, f) => sum + f.totalCost, 0) / formulas.length;
+
+  // Handle image upload
+  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>, type: 'beforeImage' | 'afterImage') => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      setFormData((prev) => ({ ...prev, [type]: ev.target?.result as string }));
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleRemoveImage = (type: 'beforeImage' | 'afterImage') => {
+    setFormData((prev) => ({ ...prev, [type]: undefined }));
+  };
 
   // Client detail view
   if (selectedClient) {
@@ -278,6 +304,23 @@ export default function Formulas() {
               <CardContent className="space-y-4">
                 {formula.notes && (
                   <p className="text-sm text-muted-foreground">{formula.notes}</p>
+                )}
+                {/* Before/After Images */}
+                {(formula.beforeImage || formula.afterImage) && (
+                  <div className="flex gap-4 mt-2">
+                    {formula.beforeImage && (
+                      <div className="flex-1">
+                        <p className="text-xs text-muted-foreground mb-1">Before</p>
+                        <img src={formula.beforeImage} alt="Before" className="w-full h-32 object-cover rounded-md border" />
+                      </div>
+                    )}
+                    {formula.afterImage && (
+                      <div className="flex-1">
+                        <p className="text-xs text-muted-foreground mb-1">After</p>
+                        <img src={formula.afterImage} alt="After" className="w-full h-32 object-cover rounded-md border" />
+                      </div>
+                    )}
+                  </div>
                 )}
                 
                 <div>
@@ -350,57 +393,55 @@ export default function Formulas() {
                 </DialogDescription>
               </DialogHeader>
               <form onSubmit={handleSubmit} className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label>Client</Label>
-                    <div className="flex gap-2">
-                      <Button
-                        type="button"
-                        variant={formData.isNewClient ? "default" : "outline"}
-                        size="sm"
-                        onClick={() => setFormData({ ...formData, isNewClient: true, clientName: "" })}
-                      >
-                        New Client
-                      </Button>
-                      <Button
-                        type="button"
-                        variant={!formData.isNewClient ? "default" : "outline"}
-                        size="sm"
-                        onClick={() => setFormData({ ...formData, isNewClient: false })}
-                      >
-                        Existing Client
-                      </Button>
-                    </div>
-                    {formData.isNewClient ? (
-                      <Input
-                        placeholder="Enter client name"
-                        value={formData.clientName}
-                        onChange={(e) => setFormData({ ...formData, clientName: e.target.value })}
-                        required
-                      />
-                    ) : (
-                      <Select value={formData.clientName} onValueChange={(value) => setFormData({ ...formData, clientName: value })}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select existing client" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {existingClients.map((clientName) => (
-                            <SelectItem key={clientName} value={clientName}>{clientName}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    )}
+                <div className="space-y-2">
+                  <Label>Client</Label>
+                  <div className="flex gap-2">
+                    <Button
+                      type="button"
+                      variant={formData.isNewClient ? "default" : "outline"}
+                      size="sm"
+                      onClick={() => setFormData({ ...formData, isNewClient: true, clientName: "" })}
+                    >
+                      New Client
+                    </Button>
+                    <Button
+                      type="button"
+                      variant={!formData.isNewClient ? "default" : "outline"}
+                      size="sm"
+                      onClick={() => setFormData({ ...formData, isNewClient: false })}
+                    >
+                      Existing Client
+                    </Button>
                   </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="date">Date</Label>
+                  {formData.isNewClient ? (
                     <Input
-                      id="date"
-                      type="date"
-                      value={formData.date}
-                      onChange={(e) => setFormData({ ...formData, date: e.target.value })}
+                      placeholder="Enter client name"
+                      value={formData.clientName}
+                      onChange={(e) => setFormData({ ...formData, clientName: e.target.value })}
                       required
                     />
-                  </div>
+                  ) : (
+                    <select
+                      value={formData.clientName}
+                      onChange={(e) => setFormData({ ...formData, clientName: e.target.value })}
+                      className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      <option value="">Select existing client</option>
+                      {existingClients.map((clientName) => (
+                        <option key={clientName} value={clientName}>{clientName}</option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+                <div className="space-y-2 mt-2">
+                  <Label htmlFor="date">Date & Time</Label>
+                  <Input
+                    id="date"
+                    type="datetime-local"
+                    value={formData.date}
+                    onChange={(e) => setFormData({ ...formData, date: e.target.value })}
+                    required
+                  />
                 </div>
                 
                 <div className="space-y-2">
@@ -413,22 +454,109 @@ export default function Formulas() {
                     rows={3}
                   />
                 </div>
+                {/* Before/After Images */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label>Before Picture</Label>
+                    {formData.beforeImage ? (
+                      <div className="relative group">
+                        <img src={formData.beforeImage} alt="Before" className="w-full h-40 object-cover rounded-md border" />
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="destructive"
+                          className="absolute top-2 right-2 opacity-80 group-hover:opacity-100"
+                          onClick={() => handleRemoveImage('beforeImage')}
+                        >
+                          Remove
+                        </Button>
+                      </div>
+                    ) : (
+                      <Input
+                        type="file"
+                        accept="image/*"
+                        onChange={(e) => handleImageChange(e, 'beforeImage')}
+                        aria-label="Upload before picture"
+                      />
+                    )}
+                  </div>
+                  <div className="space-y-2">
+                    <Label>After Picture</Label>
+                    {formData.afterImage ? (
+                      <div className="relative group">
+                        <img src={formData.afterImage} alt="After" className="w-full h-40 object-cover rounded-md border" />
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="destructive"
+                          className="absolute top-2 right-2 opacity-80 group-hover:opacity-100"
+                          onClick={() => handleRemoveImage('afterImage')}
+                        >
+                          Remove
+                        </Button>
+                      </div>
+                    ) : (
+                      <Input
+                        type="file"
+                        accept="image/*"
+                        onChange={(e) => handleImageChange(e, 'afterImage')}
+                        aria-label="Upload after picture"
+                      />
+                    )}
+                  </div>
+                </div>
 
                 <div className="space-y-4">
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 mb-2">
                     <Label>Colors Used</Label>
-                    <Select onValueChange={handleAddColor}>
-                      <SelectTrigger className="w-[200px]">
-                        <SelectValue placeholder="Add color" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {mockInventory.map((color) => (
-                          <SelectItem key={color.id} value={color.id}>
-                            {color.shade} - {color.brand}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <Popover open={colorPopoverOpen} onOpenChange={setColorPopoverOpen}>
+                      <PopoverTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="icon"
+                          aria-label="Add colors"
+                          className="ml-2"
+                        >
+                          <Plus className="h-4 w-4" />
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-72 p-0">
+                        <Command>
+                          <CommandInput
+                            placeholder="Search colors..."
+                            value={colorSearch}
+                            onValueChange={setColorSearch}
+                          />
+                          <CommandList>
+                            <CommandEmpty>No colors found.</CommandEmpty>
+                            {mockInventory
+                              .filter(color =>
+                                color.shade.toLowerCase().includes(colorSearch.toLowerCase()) ||
+                                color.brand.toLowerCase().includes(colorSearch.toLowerCase())
+                              )
+                              .map(color => (
+                                <CommandItem
+                                  key={color.id}
+                                  onSelect={() => {
+                                    if (selectedColors.find(c => c.colorId === color.id)) {
+                                      toast({ title: "Color already added", variant: "destructive" });
+                                    } else {
+                                      handleAddColor(color.id);
+                                    }
+                                    setColorPopoverOpen(false);
+                                    setColorSearch("");
+                                  }}
+                                  role="option"
+                                  tabIndex={0}
+                                >
+                                  <span className="flex-1">{color.shade} - {color.brand}</span>
+                                </CommandItem>
+                              ))}
+                          </CommandList>
+                        </Command>
+                      </PopoverContent>
+                    </Popover>
                   </div>
 
                   {selectedColors.length > 0 && (
